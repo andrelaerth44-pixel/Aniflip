@@ -20,8 +20,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.aniflip.engine.AniflipEngine
 
@@ -61,27 +64,73 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun EngineCanvasScreen(engine: AniflipEngine, width: Int, height: Int) {
-    var bitmap by remember {
-        mutableStateOf(Bitmap.createBitmap(engine.renderComposite(), width, height, Bitmap.Config.ARGB_8888))
+    // Bitmap mutável e persistente: nunca recriado a cada traço. Só seus pixels
+    // são atualizados (na região suja), o que é ordens de magnitude mais barato
+    // do que recompor e realocar o canvas inteiro a cada movimento do dedo.
+    val bitmap = remember {
+        Bitmap.createBitmap(engine.renderComposite(), width, height, Bitmap.Config.ARGB_8888)
+            .copy(Bitmap.Config.ARGB_8888, true)
     }
+
+    // Contador simples só para avisar o Compose "o bitmap mudou, redesenhe" sem
+    // precisar recriar o objeto Bitmap inteiro a cada toque.
+    var redrawTick by remember { mutableIntStateOf(0) }
+
+    // Tamanho real (em pixels) que a Image está ocupando na tela. O bitmap do
+    // motor tem resolução fixa (width x height) e o Compose estica essa imagem
+    // para caber na tela — sem essa conversão de escala, a posição do toque não
+    // bate com a posição do traço (era a causa da "distância enorme" reportada).
+    var displayedSizePx by remember { mutableStateOf(IntSize(width, height)) }
+
     val brushSize by remember { mutableIntStateOf(18) }
+    val brushColor = 0xFF1E1E1E.toInt()
+
+    fun applyPatch(patch: AniflipEngine.DirtyPatch?) {
+        if (patch == null) return
+        bitmap.setPixels(patch.pixels, 0, patch.width, patch.x, patch.y, patch.width, patch.height)
+        redrawTick++
+    }
+
+    fun toCanvasX(displayX: Float): Int {
+        val scaleX = width.toFloat() / displayedSizePx.width.coerceAtLeast(1).toFloat()
+        return (displayX * scaleX).toInt().coerceIn(0, width - 1)
+    }
+
+    fun toCanvasY(displayY: Float): Int {
+        val scaleY = height.toFloat() / displayedSizePx.height.coerceAtLeast(1).toFloat()
+        return (displayY * scaleY).toInt().coerceIn(0, height - 1)
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
         Text("Aniflip — motor de desenho (fase 1)")
+
+        // Ler redrawTick aqui garante que este bloco recomponha (e redesenhe a
+        // Image com os pixels atualizados) sempre que um patch for aplicado.
+        val tick = redrawTick
+
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Canvas",
             modifier = Modifier
                 .fillMaxSize()
-                .background(androidx.compose.ui.graphics.Color.White)
+                .background(Color.White)
+                .onSizeChanged { size -> displayedSizePx = size }
                 .pointerInput(Unit) {
-                    detectDragGestures { change, _ ->
-                        val x = change.position.x.toInt()
-                        val y = change.position.y.toInt()
-                        engine.strokeTo(x, y, brushSize, 0xFF1E1E1E.toInt())
-                        bitmap = Bitmap.createBitmap(engine.renderComposite(), width, height, Bitmap.Config.ARGB_8888)
-                    }
-                }
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            // Novo traço: reseta o motor para não conectar com o traço anterior.
+                            engine.beginStroke()
+                            val cx = toCanvasX(offset.x)
+                            val cy = toCanvasY(offset.y)
+                            applyPatch(engine.strokeTo(cx, cy, brushSize, brushColor))
+                        },
+                        onDrag = { change, _ ->
+                            val cx = toCanvasX(change.position.x)
+                            val cy = toCanvasY(change.position.y)
+                            applyPatch(engine.strokeTo(cx, cy, brushSize, brushColor))
+                        },
+                    )
+                },
         )
     }
 }
