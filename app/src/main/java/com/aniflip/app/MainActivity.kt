@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -76,10 +77,7 @@ fun EngineCanvasScreen(engine: AniflipEngine, width: Int, height: Int) {
     // precisar recriar o objeto Bitmap inteiro a cada toque.
     var redrawTick by remember { mutableIntStateOf(0) }
 
-    // Tamanho real (em pixels) que a Image está ocupando na tela. O bitmap do
-    // motor tem resolução fixa (width x height) e o Compose estica essa imagem
-    // para caber na tela — sem essa conversão de escala, a posição do toque não
-    // bate com a posição do traço (era a causa da "distância enorme" reportada).
+    // Tamanho real (em pixels) que a Image está ocupando na tela.
     var displayedSizePx by remember { mutableStateOf(IntSize(width, height)) }
 
     val brushSize by remember { mutableIntStateOf(18) }
@@ -111,6 +109,14 @@ fun EngineCanvasScreen(engine: AniflipEngine, width: Int, height: Int) {
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Canvas",
+            // FillBounds: estica o bitmap para ocupar 100% da área do composable,
+            // sem manter proporção e sem "sobra" (letterbox). Isso é essencial:
+            // o cálculo de escala do toque (toCanvasX/toCanvasY) assume que o
+            // bitmap ocupa exatamente a área do composable — com o contentScale
+            // padrão (Fit), a imagem ficava centralizada com margens vazias, e
+            // essa diferença é o que causava o traço sair sistematicamente
+            // deslocado do dedo (mais grave nas bordas).
+            contentScale = ContentScale.FillBounds,
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.White)
