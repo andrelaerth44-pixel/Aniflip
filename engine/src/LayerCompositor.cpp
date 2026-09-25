@@ -65,4 +65,40 @@ std::vector<uint32_t> LayerCompositor::composite(const LayerStack& stack, int wi
     return out;
 }
 
+std::vector<uint32_t> LayerCompositor::compositeRegion(
+    const LayerStack& stack, int canvasWidth, int canvasHeight,
+    int x0, int y0, int x1, int y1) {
+
+    x0 = std::clamp(x0, 0, canvasWidth - 1);
+    x1 = std::clamp(x1, 0, canvasWidth - 1);
+    y0 = std::clamp(y0, 0, canvasHeight - 1);
+    y1 = std::clamp(y1, 0, canvasHeight - 1);
+
+    const int rw = x1 - x0 + 1;
+    const int rh = y1 - y0 + 1;
+    std::vector<uint32_t> out(static_cast<size_t>(rw) * rh, 0);
+
+    if (rw <= 0 || rh <= 0) return out;
+
+    for (size_t i = 0; i < stack.count(); ++i) {
+        const Layer& layer = stack.at(i);
+        if (!layer.visible() || layer.opacity() <= 0.0f) continue;
+
+        const auto& src = layer.pixels();
+        for (int ry = 0; ry < rh; ++ry) {
+            const int canvasY = y0 + ry;
+            const size_t rowBase = static_cast<size_t>(canvasY) * canvasWidth;
+            const size_t outRowBase = static_cast<size_t>(ry) * rw;
+            for (int rx = 0; rx < rw; ++rx) {
+                const size_t srcIdx = rowBase + (x0 + rx);
+                const size_t outIdx = outRowBase + rx;
+                const uint32_t srcPixel = applyOpacity(src[srcIdx], layer.opacity());
+                out[outIdx] = blendSrcOver(srcPixel, out[outIdx]);
+            }
+        }
+    }
+
+    return out;
+}
+
 } // namespace aniflip
